@@ -5,10 +5,8 @@ Parameters:
   Prefix:
     Type: String
     Default: nyota
-    Description: Your lastname prefix
 
 Resources:
-  # ==================== VPC & Networking ====================
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -81,6 +79,7 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
+
   PublicSubnet1Association:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -101,6 +100,7 @@ Resources:
     Properties:
       AllocationId: !GetAtt NatGatewayEIP.AllocationId
       SubnetId: !Ref PublicSubnet1
+
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -111,6 +111,7 @@ Resources:
       RouteTableId: !Ref PrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGateway
+
   PrivateSubnet1Association:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -122,7 +123,6 @@ Resources:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable
 
-  # ==================== Security Groups ====================
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -133,34 +133,24 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: !Sub ${Prefix}-alb-sg
 
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow traffic only from ALB
+      GroupDescription: Allow from ALB only
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 5000
           ToPort: 5000
           SourceSecurityGroupId: !Ref ALBSecurityGroup
-      Tags:
-        - Key: Name
-          Value: !Sub ${Prefix}-ecs-sg
 
-  # ==================== ALB ====================
   ApplicationLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Name: !Sub ${Prefix}-alb
-      Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
-      SecurityGroups:
-        - !Ref ALBSecurityGroup
+      Subnets: [!Ref PublicSubnet1, !Ref PublicSubnet2]
+      SecurityGroups: [!Ref ALBSecurityGroup]
       Scheme: internet-facing
 
   TargetGroup:
@@ -172,11 +162,10 @@ Resources:
       VpcId: !Ref VPC
       TargetType: ip
       HealthCheckPath: /
-      Matcher:
-        HttpCode: "200"
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: ApplicationLoadBalancer
     Properties:
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: 80
@@ -185,33 +174,10 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
 
-  # ==================== ECS Cluster & Service ====================
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Sub ${Prefix}-final-cluster
-
-  ECSTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: !Sub ${Prefix}-api
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      Cpu: "512"
-      Memory: "1024"
-      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      ContainerDefinitions:
-        - Name: nyota-api
-          Image: placeholder
-          PortMappings:
-            - ContainerPort: 5000
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref ECSLogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: nyota
 
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
@@ -231,8 +197,30 @@ Resources:
     Properties:
       LogGroupName: !Sub /ecs/${Prefix}-api
 
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${Prefix}-api
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: nyota-api
+          Image: 387324564533.dkr.ecr.ca-central-1.amazonaws.com/nyota-final-repo:latest
+          PortMappings:
+            - ContainerPort: 5000
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: nyota
+
   ECSService:
     Type: AWS::ECS::Service
+    DependsOn: Listener
     Properties:
       Cluster: !Ref ECSCluster
       ServiceName: !Sub ${Prefix}-final-service
@@ -241,18 +229,24 @@ Resources:
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
-          SecurityGroups:
-            - !Ref ECSSecurityGroup
+          Subnets: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+          SecurityGroups: [!Ref ECSSecurityGroup]
           AssignPublicIp: DISABLED
       LoadBalancers:
         - TargetGroupArn: !Ref TargetGroup
           ContainerName: nyota-api
           ContainerPort: 5000
 
-  # ==================== Auto Scaling (2 → 5 on 90% CPU) ====================
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 5
+      MinCapacity: 2
+      ResourceId: !Sub service/${ECSCluster}/${ECSService}
+      RoleARN: arn:aws:iam::387324564533:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
   ECSScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
@@ -266,37 +260,7 @@ Resources:
         ScaleOutCooldown: 120
         ScaleInCooldown: 120
 
-  ScalableTarget:
-    Type: AWS::ApplicationAutoScaling::ScalableTarget
-    Properties:
-      MaxCapacity: 5
-      MinCapacity: 2
-      ResourceId: !Sub service/${ECSCluster}/${ECSService}
-      RoleARN: !GetAtt ECSScalingRole.Arn
-      ScalableDimension: ecs:service:DesiredCount
-      ServiceNamespace: ecs
-
-  ECSScalingRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: application-autoscaling.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSApplicationAutoScalingForECS
-
 Outputs:
   ALBDNS:
     Description: Load Balancer DNS Name
     Value: !GetAtt ApplicationLoadBalancer.DNSName
-    Export:
-      Name: !Sub ${Prefix}-alb-dns
-
-  ECSClusterName:
-    Value: !Ref ECSCluster
-  ECSServiceName:
-    Value: !Ref ECSService

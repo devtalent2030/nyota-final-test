@@ -5,9 +5,9 @@ echo "=================================================="
 echo "    Nyota Final Test – FULL ONE-CLICK DEPLOYMENT"
 echo "=================================================="
 
-# === EDIT ONLY THESE TWO LINES ===
-export GITHUB_OWNER="YOUR_GITHUB_USERNAME"        # ← CHANGE THIS (e.g. home123)
-export CONNECTION_ARN="arn:aws:codeconnections:ca-central-1:YOUR_ACCOUNT_ID:connection/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # ← CHANGE THIS
+# === YOUR REAL VALUES (already filled in) ===
+export GITHUB_OWNER="talent"       # ← Change only if your GitHub username is different
+export CONNECTION_ARN="arn:aws:codeconnections:ca-central-1:387324564533:connection/850e5c22-b1ae-49a6-badb-88c3b119133f"
 # =====================================
 
 export AWS_REGION="ca-central-1"
@@ -54,14 +54,14 @@ echo ""
 echo "Next steps:"
 echo "   1. Go to AWS Console → CodePipeline"
 echo "   2. Open pipeline: nyota-final-pipeline"
-echo "   3. Click 'Release change' → 'Approve' when asked"
-echo "   4. Wait 5–8 minutes → everything turns green"
+echo "   3. Click 'Review' → 'Approve' (when it asks)"
+echo "   4. Wait 5–8 minutes → everything turns GREEN"
 echo ""
-echo "Then take your 11 perfect screenshots and submit Nyota_Final.docx"
+echo "Then take your 11 screenshots → submit Nyota_Final.docx → 30/30"
 echo ""
-echo "To delete everything later, run:"
+echo "Cleanup command (run after submission):"
 echo "   aws cloudformation delete-stack --stack-name ${PREFIX}-cicd"
 echo "   aws cloudformation delete-stack --stack-name ${PREFIX}-infra"
 echo "   aws ecr delete-repository --repository-name ${PREFIX}-final-repo --force --region $AWS_REGION"
 echo ""
-echo "You are now 20 minutes away from 30/30. Good luck!"
+echo "You got this! 100% guaranteed."
